@@ -14,42 +14,17 @@ export async function startAuditJob(payload) {
     };
     jobStatusStore.set(id, initial);
     await crawlQueue.add('crawl-site', { auditId: id, domain: payload.domain, intent: payload.intent }, {
-        removeOnComplete: true,
-        removeOnFail: true,
+        removeOnComplete: false,
+        removeOnFail: false,
     });
     setTimeout(() => {
         const current = jobStatusStore.get(id) ?? initial;
-        jobStatusStore.set(id, {
-            ...current,
-            status: 'RUNNING',
-        });
-    }, 200);
-    setTimeout(async () => {
-        const current = jobStatusStore.get(id) ?? initial;
-        jobStatusStore.set(id, {
-            ...current,
-            status: 'COMPLETED',
-            visibilityScore: 82,
-            technicalScore: 78,
-            findings: [
-                {
-                    id: 'rec-1',
-                    title: 'Missing Product JSON-LD on pricing page',
-                    severity: 'High',
-                    impact: 92,
-                    effort: 'Low',
-                    recommendation: 'Add JSON-LD Product schema with price, currency, availability, and reviews.',
-                },
-                {
-                    id: 'rec-2',
-                    title: 'Duplicate title tags across key routes',
-                    severity: 'Medium',
-                    impact: 67,
-                    effort: 'Medium',
-                    recommendation: 'Create unique metadata and canonical tags for category pages.',
-                },
-            ],
-        });
-    }, 2600);
+        if (current.status === 'QUEUED') {
+            jobStatusStore.set(id, {
+                ...current,
+                status: 'RUNNING',
+            });
+        }
+    }, 250);
     return { id, payload };
 }

@@ -14,12 +14,24 @@ type AuditStatus = {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
+const defaultFinding = {
+  id: 'default-1',
+  title: 'Missing Product JSON-LD on pricing page',
+  severity: 'High',
+  impact: 92,
+  effort: 'Low',
+  recommendation: 'Add valid product schema to the pricing page.',
+};
+
 export default function Home() {
   const [domain, setDomain] = useState('https://example.com');
   const [loading, setLoading] = useState(false);
   const [audit, setAudit] = useState<AuditStatus | null>(null);
+  const [selectedFinding, setSelectedFinding] = useState<any | null>(null);
   const [productName, setProductName] = useState('Acme Growth Suite');
   const [productPrice, setProductPrice] = useState('49');
+  const [productDescription, setProductDescription] = useState('AI visibility and workflow automation platform');
+  const [productSku, setProductSku] = useState('ACME-GROWTH-001');
   const [prompt, setPrompt] = useState('What is the best HR software for remote teams?');
   const [aiResponse, setAiResponse] = useState<any>(null);
 
@@ -32,10 +44,14 @@ export default function Home() {
     if (!audit || audit.status === 'COMPLETED' || audit.status === 'FAILED') return;
 
     const timer = setInterval(async () => {
-      const response = await fetch(`${API_BASE}/api/audits/${audit.id}/status`);
-      const payload = await response.json();
-      if (payload.ok && payload.audit) {
-        setAudit(payload.audit);
+      try {
+        const response = await fetch(`${API_BASE}/api/audits/${audit.id}/status`);
+        const payload = await response.json();
+        if (payload.ok && payload.audit) {
+          setAudit(payload.audit);
+        }
+      } catch {
+        // ignore transient polling error while the queue is still initializing
       }
     }, 1400);
 
@@ -60,7 +76,13 @@ export default function Home() {
     const response = await fetch(`${API_BASE}/api/products`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: productName, description: 'AI visibility and workflow automation platform', price: Number(productPrice), currency: 'USD' }),
+      body: JSON.stringify({
+        name: productName,
+        description: productDescription,
+        price: Number(productPrice),
+        currency: 'USD',
+        sku: productSku,
+      }),
     });
     const payload = await response.json();
     if (payload.ok) {
@@ -72,7 +94,7 @@ export default function Home() {
     const response = await fetch(`${API_BASE}/api/ai/track`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, model: 'mock', organizationId: 'org_demo_01' }),
+      body: JSON.stringify({ prompt, model: 'mock', organizationId: 1 }),
     });
     const payload = await response.json();
     if (payload.ok) {
@@ -85,6 +107,23 @@ export default function Home() {
     { label: 'AI mentions', value: aiResponse?.mentions ?? 14, suffix: 'tracks', accent: 'text-violet-400' },
     { label: 'Priority fixes', value: audit?.findings?.length ?? 7, suffix: 'urgent', accent: 'text-amber-400' },
   ];
+
+  const visibleFindings = audit?.findings?.length ? audit.findings : [defaultFinding];
+
+  const handlePreview = (finding: any) => {
+    const issue = finding.title ?? 'Missing product schema';
+    const fix = issue.includes('JSON')
+      ? '{\n  "@context": "https://schema.org",\n  "@type": "Product",\n  "name": "Acme Growth Suite",\n  "offers": {"@type": "Offer", "price": "49", "priceCurrency": "USD"}\n}'
+      : '<title>Acme Growth Suite | AI Visibility & Workflow Automation</title>\n<meta name="description" content="Ship faster with AI workflows for product, ops, and revenue teams." />';
+
+    setSelectedFinding({ ...finding, fix });
+  };
+
+  const copyFix = async () => {
+    if (!selectedFinding) return;
+    await navigator.clipboard.writeText(selectedFinding.fix ?? '');
+    setSelectedFinding(null);
+  };
 
   const progress = [
     { label: 'Homepage crawl', value: audit?.status === 'COMPLETED' ? 100 : audit ? 72 : 42, color: 'bg-cyan-400' },
@@ -156,15 +195,18 @@ export default function Home() {
           <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
             <h2 className="text-lg font-semibold text-white">Top priorities</h2>
             <ul className="mt-5 space-y-4 text-sm text-slate-300">
-              {(audit?.findings ?? [
-                { id: '1', title: 'Missing Product JSON-LD on pricing page', severity: 'High', impact: 92, effort: 'Low', recommendation: 'Add valid product schema' },
-                { id: '2', title: 'Duplicate title tags on key route', severity: 'Medium', impact: 67, effort: 'Medium', recommendation: 'Create unique titles' },
-              ]).map((finding) => (
+              {visibleFindings.map((finding) => (
                 <li key={finding.id} className="rounded-xl border border-red-500/20 bg-red-500/5 p-3">
                   <div className="font-medium text-white">{finding.title}</div>
                   <div className="mt-1 text-xs text-slate-400">
                     {finding.severity} · impact {finding.impact} · effort {finding.effort}
                   </div>
+                  <button
+                    onClick={() => handlePreview(finding)}
+                    className="mt-3 rounded-full bg-white/5 px-3 py-1 text-xs font-medium text-cyan-300 hover:bg-white/10"
+                  >
+                    Fix Issue
+                  </button>
                 </li>
               ))}
             </ul>
@@ -176,7 +218,9 @@ export default function Home() {
             <h2 className="text-lg font-semibold text-white">Products</h2>
             <div className="mt-4 space-y-4">
               <input value={productName} onChange={(event) => setProductName(event.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100" placeholder="Product name" />
+              <input value={productDescription} onChange={(event) => setProductDescription(event.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100" placeholder="Product description" />
               <input value={productPrice} onChange={(event) => setProductPrice(event.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100" placeholder="Price in USD" />
+              <input value={productSku} onChange={(event) => setProductSku(event.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100" placeholder="SKU" />
               <button onClick={addProduct} className="rounded-full bg-violet-500 px-4 py-2 text-sm font-medium text-white hover:bg-violet-400">Add product</button>
             </div>
           </div>
@@ -197,6 +241,37 @@ export default function Home() {
           </div>
         </section>
       </div>
+
+      {selectedFinding ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4">
+          <div className="w-full max-w-2xl rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-cyan-400">Recommendation preview</p>
+                <h3 className="mt-2 text-xl font-semibold text-white">{selectedFinding.title}</h3>
+              </div>
+              <button onClick={() => setSelectedFinding(null)} className="text-sm text-slate-400 hover:text-white">Dismiss</button>
+            </div>
+
+            <div className="space-y-4 text-sm text-slate-300">
+              <div className="rounded-xl border border-slate-700 bg-slate-950 p-3">
+                <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-400">Current issue</div>
+                <div>{selectedFinding.title}</div>
+              </div>
+
+              <div className="rounded-xl border border-slate-700 bg-slate-950 p-3">
+                <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-400">Citable suggested fix</div>
+                <pre className="overflow-x-auto whitespace-pre-wrap text-xs text-cyan-200">{selectedFinding.fix}</pre>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button onClick={() => setSelectedFinding(null)} className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200">Dismiss</button>
+              <button onClick={copyFix} className="rounded-full bg-cyan-500 px-4 py-2 text-sm font-medium text-slate-950">Approve & Copy Code</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

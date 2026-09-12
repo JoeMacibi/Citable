@@ -3,6 +3,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { redis } from './queue.js';
 import { calculateTechnicalScore, validateTargetUrl } from './security.js';
+import { jobStatusStore } from './service.js';
 
 const MAX_PAGES = 25;
 
@@ -109,10 +110,14 @@ export const crawlerWorker = new Worker<CrawlPayload>(
   'citable-crawl',
   async (job: Job<CrawlPayload>) => {
     const { auditId, domain } = job.data;
-    const result = await crawlSite(domain);
+    const existing = jobStatusStore.get(auditId) ?? { id: auditId, domain, intent: 'website', status: 'RUNNING', visibilityScore: 0, technicalScore: 0, findings: [] };
+    jobStatusStore.set(auditId, { ...existing, status: 'RUNNING' });
 
-    return {
-      auditId,
+    const result = await crawlSite(domain);
+    const completed = {
+      id: auditId,
+      domain,
+      intent: 'website',
       status: 'COMPLETED',
       visibilityScore: result.visibilityScore,
       technicalScore: result.technicalScore,
@@ -134,6 +139,12 @@ export const crawlerWorker = new Worker<CrawlPayload>(
           recommendation: 'Add JSON-LD Product schema with name, price, currency, and offer details.',
         },
       ],
+    };
+
+    jobStatusStore.set(auditId, completed);
+
+    return {
+      ...completed,
       result,
     };
   },
