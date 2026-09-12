@@ -28,6 +28,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [audit, setAudit] = useState<AuditStatus | null>(null);
   const [selectedFinding, setSelectedFinding] = useState<any | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [productName, setProductName] = useState('Acme Growth Suite');
   const [productPrice, setProductPrice] = useState('49');
   const [productDescription, setProductDescription] = useState('AI visibility and workflow automation platform');
@@ -39,6 +40,13 @@ export default function Home() {
     if (!audit) return 'No audit started';
     return `${audit.status} · ${audit.visibilityScore}/100 visibility`;
   }, [audit]);
+
+  const statusTimeline = [
+    { label: 'Queued', detail: 'Job enqueued, starting crawler…', active: !audit || audit.status === 'QUEUED' },
+    { label: 'Crawling', detail: 'Discovering pages and checking robots.txt / sitemap.xml…', active: audit?.status === 'RUNNING' },
+    { label: 'Analyzing', detail: 'Auditing metadata, structured JSON-LD, and technical SEO…', active: audit?.status === 'RUNNING' },
+    { label: 'Completed', detail: 'Generating Citable visibility score and prioritized fixes…', active: audit?.status === 'COMPLETED' },
+  ];
 
   useEffect(() => {
     if (!audit || audit.status === 'COMPLETED' || audit.status === 'FAILED') return;
@@ -60,16 +68,26 @@ export default function Home() {
 
   const startAudit = async () => {
     setLoading(true);
-    const response = await fetch(`${API_BASE}/api/audits/run`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ domain, intent: 'website' }),
-    });
-    const payload = await response.json();
-    if (payload.ok) {
+    setError(null);
+
+    try {
+      const normalized = domain.trim();
+      new URL(normalized);
+      const response = await fetch(`${API_BASE}/api/audits/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain: normalized, intent: 'website' }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload?.message || 'Unable to create the audit.');
+      }
       setAudit(payload.audit);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'We could not reach this URL. Please check the domain and try again.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const addProduct = async () => {
@@ -103,9 +121,9 @@ export default function Home() {
   };
 
   const stats = [
-    { label: 'Overall visibility', value: audit?.visibilityScore ?? 82, suffix: '/100', accent: 'text-cyan-400' },
-    { label: 'AI mentions', value: aiResponse?.mentions ?? 14, suffix: 'tracks', accent: 'text-violet-400' },
-    { label: 'Priority fixes', value: audit?.findings?.length ?? 7, suffix: 'urgent', accent: 'text-amber-400' },
+    { label: 'Overall visibility', value: audit?.visibilityScore ?? 82, suffix: '/100', accent: 'text-cyan-400', source: 'Source: Citable Engine' },
+    { label: 'AI mentions', value: aiResponse?.mentions ?? 14, suffix: 'tracks', accent: 'text-violet-400', source: 'Source: AI Visibility' },
+    { label: 'Priority fixes', value: audit?.findings?.length ?? 7, suffix: 'urgent', accent: 'text-amber-400', source: 'Source: Search Console' },
   ];
 
   const visibleFindings = audit?.findings?.length ? audit.findings : [defaultFinding];
@@ -156,6 +174,15 @@ export default function Home() {
           </div>
         </header>
 
+        {error ? (
+          <div className="mb-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
+            <div className="flex items-center justify-between gap-4">
+              <span>{error}</span>
+              <button onClick={startAudit} className="rounded-full bg-red-500 px-3 py-1.5 text-xs font-medium text-white">Retry</button>
+            </div>
+          </div>
+        ) : null}
+
         <section className="grid gap-6 md:grid-cols-3">
           {stats.map((stat) => (
             <div key={stat.label} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-lg shadow-slate-950/20">
@@ -164,6 +191,7 @@ export default function Home() {
                 <span className="text-5xl font-bold text-white">{stat.value}</span>
                 <span className={`pb-2 text-lg ${stat.accent}`}>{stat.suffix}</span>
               </div>
+              <div className="mt-3 text-[11px] uppercase tracking-[0.18em] text-slate-500">{stat.source}</div>
             </div>
           ))}
         </section>
@@ -178,6 +206,26 @@ export default function Home() {
             </div>
 
             <div className="space-y-4">
+              {statusTimeline.map((step, index) => (
+                <div key={step.label} className="flex gap-3">
+                  <div className="flex flex-col items-center">
+                    <div className={`flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-bold ${step.active ? 'border-cyan-400 bg-cyan-500/20 text-cyan-200' : 'border-slate-700 bg-slate-800 text-slate-500'}`}>
+                      {index + 1}
+                    </div>
+                    {index !== statusTimeline.length - 1 ? <div className="mt-2 h-8 w-px bg-slate-700" /> : null}
+                  </div>
+                  <div className="flex-1 rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-medium text-slate-200">{step.label}</div>
+                      <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">{step.active ? 'active' : 'pending'}</div>
+                    </div>
+                    <div className="mt-1 text-xs text-slate-400">{step.detail}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 space-y-4">
               {progress.map((item) => (
                 <div key={item.label}>
                   <div className="mb-2 flex justify-between text-sm text-slate-300">
@@ -261,7 +309,7 @@ export default function Home() {
 
               <div className="rounded-xl border border-slate-700 bg-slate-950 p-3">
                 <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-400">Citable suggested fix</div>
-                <pre className="overflow-x-auto whitespace-pre-wrap text-xs text-cyan-200">{selectedFinding.fix}</pre>
+                <pre className="overflow-x-auto rounded-lg border border-slate-700 bg-slate-950 p-3 whitespace-pre-wrap text-xs leading-6 text-cyan-200">{selectedFinding.fix}</pre>
               </div>
             </div>
 
