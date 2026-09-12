@@ -2,18 +2,34 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { config } from 'dotenv';
 import { z } from 'zod';
+import { db } from './db.js';
+import { crawlerWorker } from './crawlerWorker.js';
+import { aiPrompts, organizations, products } from './schema.js';
+import { jobStatusStore, startAuditJob } from './service.js';
 
 config();
 
 const app = Fastify({ logger: true });
 
-await app.register(cors, {
-  origin: true,
-});
+await app.register(cors, { origin: true });
 
 const createAuditSchema = z.object({
-  domain: z.string().url().or(z.string().min(1)),
+  domain: z.string().min(1),
   intent: z.enum(['website', 'product', 'ai']).default('website'),
+});
+
+const createProductSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  price: z.number().default(0),
+  currency: z.string().default('USD'),
+  organizationId: z.number().optional(),
+});
+
+const createAiTrackSchema = z.object({
+  prompt: z.string().min(1),
+  model: z.string().default('mock'),
+  organizationId: z.number().optional(),
 });
 
 app.get('/api/health', async () => ({
@@ -25,47 +41,91 @@ app.get('/api/health', async () => ({
 
 app.post('/api/audits/run', async (request, reply) => {
   const parsed = createAuditSchema.safeParse(request.body ?? {});
-
   if (!parsed.success) {
     reply.code(400);
-    return {
-      ok: false,
-      errors: parsed.error.flatten(),
-    };
+    return { ok: false, errors: parsed.error.flatten() };
   }
 
   const { domain, intent } = parsed.data;
-
-  const score = 82;
+  const job = await startAuditJob({ domain, intent });
 
   return {
     ok: true,
-    organizationId: 'org_demo_01',
     audit: {
-      id: 'audit_demo_01',
+      id: job.id,
       domain,
       intent,
-      score,
-      status: 'COMPLETED',
-      overallVisibilityScore: `${score}/100`,
-      message: 'Citable visibility audit completed for ' + domain,
+      status: 'QUEUED',
+      visibilityScore: 0,
+      technicalScore: 0,
+      findings: [],
     },
-    recommendations: [
-      {
-        id: 'rec-1',
-        label: 'Add product schema markup',
-        priority: 'HIGH',
-        impact: 92,
-        confidence: 92,
-      },
-      {
-        id: 'rec-2',
-        label: 'Fix duplicate title tags',
-        priority: 'MEDIUM',
-        impact: 67,
-        confidence: 78,
-      },
-    ],
+  };
+});
+
+app.get('/api/audits/:id/status', async (request, reply) => {
+  const { id } = request.params as { id: string };
+  const status = await jobStatusStore.get(id);
+
+  if (!status) {
+    reply.code(404);
+    return { ok: false, message: 'Audit not found' };
+  }
+
+  return { ok: true, audit: status };
+});
+
+app.post('/api/products', async (request, reply) => {
+  const parsed = createProductSchema.safeParse(request.body ?? {});
+  if (!parsed.success) {
+    reply.code(400);
+    return { ok: false, errors: parsed.error.flatten() };
+  }
+
+  const organizationId = parsed.data.organizationId ?? 1;
+  const [product] = await db.insert(products).values({
+    organizationId,
+    name: parsed.data.name,
+    description: parsed.data.description ?? '',
+    price: Math.round(parsed.data.price * 100),
+    currency: parsed.data.currency,
+    sku: `prod-${Date.now()}`,
+    schemaValid: 1,
+  }).returning();
+
+  return { ok: true, product };
+});
+
+app.post('/api/ai/track', async (request, reply) => {
+  const parsed = createAiTrackSchema.safeParse(request.body ?? {});
+  if (!parsed.success) {
+    reply.code(400);
+    return { ok: false, errors: parsed.error.flatten() };
+  }
+
+  const { prompt, model, organizationId = 1 } = parsed.data;
+  const result = {
+    mentions: 12,
+    citations: 4,
+    summary: `The best-fitting response for “${prompt}” is based on product and SEO visibility signals.`,
+  };
+
+  await db.insert(aiPrompts).values({
+    organizationId,
+    prompt,
+    model,
+    mentions: result.mentions,
+    citations: result.citations,
+  });
+
+  return { ok: true, result };
+});
+
+app.get('/api/bootstrap', async () => {
+  const [org] = await db.insert(organizations).values({ name: 'Acme Commerce' }).returning();
+  return {
+    ok: true,
+    organization: org ?? { id: 1, name: 'Acme Commerce' },
   };
 });
 

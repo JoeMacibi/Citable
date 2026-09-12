@@ -19,40 +19,31 @@ services:
     ports:
       - "6379:6379"
 
-  rabbitmq:
-    image: rabbitmq:3-management
-    container_name: citable-rabbitmq
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-
-  backend:
+  api:
     build:
-      context: ./backend
-    container_name: citable-backend
+      context: ./apps/api
+    container_name: citable-api
     depends_on:
       - postgres
       - redis
-      - rabbitmq
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/citable
-      SPRING_DATASOURCE_USERNAME: citable
-      SPRING_DATASOURCE_PASSWORD: citable
-      SPRING_RABBITMQ_HOST: rabbitmq
-      SPRING_REDIS_HOST: redis
+      PORT: 4000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://citable:citable@postgres:5432/citable
+      REDIS_URL: redis://redis:6379
     ports:
-      - "8080:8080"
+      - "4000:4000"
 
-  frontend:
+  web:
     build:
       context: ./web
-    container_name: citable-frontend
+    container_name: citable-web
     depends_on:
-      - backend
+      - api
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: http://backend:8080
+      NEXT_PUBLIC_API_URL: http://api:4000
 
 volumes:
   pgdata:
