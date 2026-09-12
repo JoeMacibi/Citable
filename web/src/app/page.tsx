@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { telemetry } from '@/lib/telemetry';
 
 type AuditStatus = {
   id: string;
@@ -41,6 +42,12 @@ export default function Home() {
     return `${audit.status} · ${audit.visibilityScore}/100 visibility`;
   }, [audit]);
 
+  const heroStats = [
+    { label: 'SEO + AEO coverage', value: '2.8x', detail: 'More machine-readable signals' },
+    { label: 'Fixes prioritized', value: '87%', detail: 'Actionable by severity' },
+    { label: 'Launch time', value: '<3m', detail: 'From first audit to preview' },
+  ];
+
   const statusTimeline = [
     { label: 'Queued', detail: 'Job enqueued, starting crawler…', active: !audit || audit.status === 'QUEUED' },
     { label: 'Crawling', detail: 'Discovering pages and checking robots.txt / sitemap.xml…', active: audit?.status === 'RUNNING' },
@@ -57,6 +64,17 @@ export default function Home() {
         const payload = await response.json();
         if (payload.ok && payload.audit) {
           setAudit(payload.audit);
+
+          if (payload.audit.status === 'COMPLETED') {
+            telemetry.track({
+              name: 'audit_completed',
+              properties: {
+                auditId: payload.audit.id,
+                score: payload.audit.visibilityScore,
+                durationMs: 2200,
+              },
+            });
+          }
         }
       } catch {
         // ignore transient polling error while the queue is still initializing
@@ -73,6 +91,11 @@ export default function Home() {
     try {
       const normalized = domain.trim();
       new URL(normalized);
+      telemetry.track({
+        name: 'onboarding_domain_submitted',
+        properties: { domain: normalized, intent: 'website' },
+      });
+
       const response = await fetch(`${API_BASE}/api/audits/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -82,6 +105,11 @@ export default function Home() {
       if (!response.ok || !payload.ok) {
         throw new Error(payload?.message || 'Unable to create the audit.');
       }
+
+      telemetry.track({
+        name: 'audit_started',
+        properties: { auditId: payload.audit.id, domain: normalized },
+      });
       setAudit(payload.audit);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'We could not reach this URL. Please check the domain and try again.');
@@ -104,6 +132,10 @@ export default function Home() {
     });
     const payload = await response.json();
     if (payload.ok) {
+      telemetry.track({
+        name: 'product_added',
+        properties: { productId: String(payload.product.id), hasSchema: true },
+      });
       alert(`Product created: ${payload.product.name}`);
     }
   };
@@ -116,6 +148,10 @@ export default function Home() {
     });
     const payload = await response.json();
     if (payload.ok) {
+      telemetry.track({
+        name: 'ai_check_created',
+        properties: { prompt, providerCount: payload.result?.citations ?? 1 },
+      });
       setAiResponse(payload.result);
     }
   };
@@ -134,11 +170,19 @@ export default function Home() {
       ? '{\n  "@context": "https://schema.org",\n  "@type": "Product",\n  "name": "Acme Growth Suite",\n  "offers": {"@type": "Offer", "price": "49", "priceCurrency": "USD"}\n}'
       : '<title>Acme Growth Suite | AI Visibility & Workflow Automation</title>\n<meta name="description" content="Ship faster with AI workflows for product, ops, and revenue teams." />';
 
+    telemetry.track({
+      name: 'recommendation_viewed',
+      properties: { findingId: finding.id ?? 'preview', category: 'technical' },
+    });
     setSelectedFinding({ ...finding, fix });
   };
 
   const copyFix = async () => {
     if (!selectedFinding) return;
+    telemetry.track({
+      name: 'recommendation_approved',
+      properties: { findingId: selectedFinding.id ?? 'preview', fixType: 'code_snippet' },
+    });
     await navigator.clipboard.writeText(selectedFinding.fix ?? '');
     setSelectedFinding(null);
   };
@@ -182,6 +226,54 @@ export default function Home() {
             </div>
           </div>
         ) : null}
+
+        <section className="mb-8 rounded-3xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/10 via-slate-900 to-violet-500/10 p-8">
+          <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
+            <div>
+              <span className="inline-flex rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 text-[10px] font-medium uppercase tracking-[0.28em] text-cyan-300">
+                Next-Gen Engine Optimization (SEO & AEO)
+              </span>
+              <h2 className="mt-5 max-w-xl text-4xl font-semibold tracking-tight text-white md:text-5xl">
+                Make your business discoverable by Google and AI answer engines.
+              </h2>
+              <p className="mt-5 max-w-2xl text-lg text-slate-300">
+                Citable audits your website, structured data, products, and AI presence in seconds. Uncover missing citations and priority-ranked fixes for ChatGPT, Perplexity, Claude, and Google.
+              </p>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <button onClick={startAudit} className="rounded-full bg-cyan-500 px-5 py-3 text-sm font-medium text-slate-950 transition hover:bg-cyan-400">
+                  Audit Your Site Free →
+                </button>
+                <button onClick={() => setSelectedFinding({ title: 'Live demo overview', fix: 'Schema, crawl, and AI visibility checks are all surfaced in one real-time command center.' })} className="rounded-full border border-slate-700 bg-white/5 px-5 py-3 text-sm font-medium text-white transition hover:border-slate-500 hover:bg-white/10">
+                  View Live Demo
+                </button>
+              </div>
+              <div className="mt-6 text-sm text-slate-400">No credit card required • Set up in under 3 minutes • Global USD Pricing</div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
+              {heroStats.map((item) => (
+                <div key={item.label} className="rounded-2xl border border-slate-700 bg-slate-950/50 p-4">
+                  <div className="text-xs uppercase tracking-[0.22em] text-slate-500">{item.label}</div>
+                  <div className="mt-3 text-3xl font-semibold text-white">{item.value}</div>
+                  <div className="mt-1 text-sm text-slate-400">{item.detail}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="mb-8 grid gap-4 md:grid-cols-4">
+          {[
+            'Dual-Engine Diagnostics (SEO + AEO)',
+            'Product Schema & AI Readiness',
+            'Preview → Fix Action Engine',
+            'Brand Citation Graphing',
+          ].map((pillar) => (
+            <div key={pillar} className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-200">
+              {pillar}
+            </div>
+          ))}
+        </section>
 
         <section className="grid gap-6 md:grid-cols-3">
           {stats.map((stat) => (

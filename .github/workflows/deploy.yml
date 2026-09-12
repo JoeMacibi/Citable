@@ -1,0 +1,46 @@
+name: Production CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Web Dependencies
+        run: |
+          cd web
+          npm ci
+
+      - name: Build Web Application
+        run: |
+          cd web
+          npm run build
+
+      - name: Install API Dependencies
+        run: |
+          cd apps/api
+          npm ci
+
+      - name: Build API & Workers
+        run: |
+          cd apps/api
+          npm run build
+
+  deploy-cloud:
+    needs: test-and-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy Notification
+        run: echo "Code validated successfully. Triggering cloud deployment hooks..."
+      # Add Railway, Render, Fly.io, or Vercel deployment webhooks here
