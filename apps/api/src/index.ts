@@ -7,6 +7,8 @@ import { crawlerWorker } from './crawlerWorker.js';
 import { aiPrompts, organizations, products } from './schema.js';
 import { approveAuditFinding, getAuditStatus, jobStatusStore, startAuditJob } from './service.js';
 import { eq } from 'drizzle-orm';
+import { analyzeProductSchema, buildProductSchemaSnippet } from './productSchema.js';
+import { evaluateAiVisibility } from './aiVisibility.js';
 
 config();
 
@@ -110,6 +112,14 @@ app.post('/api/products', async (request, reply) => {
   }
 
   const organization = await getOrCreateOrganization(parsed.data.organizationId);
+  const schemaAnalysis = analyzeProductSchema({
+    name: parsed.data.name,
+    description: parsed.data.description ?? '',
+    price: parsed.data.price,
+    currency: parsed.data.currency,
+    sku: `prod-${Date.now()}`,
+  });
+
   const [product] = await db.insert(products).values({
     organizationId: organization.id,
     name: parsed.data.name,
@@ -117,10 +127,28 @@ app.post('/api/products', async (request, reply) => {
     price: Math.round(parsed.data.price * 100),
     currency: parsed.data.currency,
     sku: `prod-${Date.now()}`,
-    schemaValid: 1,
+    schemaValid: schemaAnalysis.score >= 75 ? 1 : 0,
   }).returning();
 
-  return { ok: true, product };
+  return { ok: true, product, schema: schemaAnalysis, snippet: buildProductSchemaSnippet({
+    name: parsed.data.name,
+    description: parsed.data.description ?? '',
+    price: parsed.data.price,
+    currency: parsed.data.currency,
+    sku: `prod-${Date.now()}`,
+    url: 'https://example.com/product',
+  }) };
+});
+
+app.post('/api/products/schema/analyze', async (request, reply) => {
+  const payload = request.body as Record<string, unknown> | undefined;
+  if (!payload || typeof payload !== 'object') {
+    reply.code(400);
+    return { ok: false, message: 'A product payload is required.' };
+  }
+
+  const analysis = analyzeProductSchema(payload);
+  return { ok: true, analysis, snippet: buildProductSchemaSnippet(payload as Record<string, unknown>) };
 });
 
 app.get('/api/products', async () => {
@@ -149,12 +177,7 @@ app.post('/api/ai/track', async (request, reply) => {
 
   const { prompt, model, organizationId } = parsed.data;
   const organization = await getOrCreateOrganization(organizationId);
-  const result = {
-    mentions: 12,
-    citations: 4,
-    summary: `The best-fitting response for “${prompt}” is based on product and SEO visibility signals.`,
-    flow: ['Brand', 'AI Response', 'Cited Source Domain'],
-  };
+  const result = evaluateAiVisibility(prompt, { model, organizationId: organization.id });
 
   const [record] = await db.insert(aiPrompts).values({
     organizationId: organization.id,
@@ -165,6 +188,18 @@ app.post('/api/ai/track', async (request, reply) => {
   }).returning();
 
   return { ok: true, result: { ...result, id: record?.id ?? Date.now() } };
+});
+
+app.post('/api/ai/visibility/evaluate', async (request, reply) => {
+  const payload = request.body as { prompt?: string; model?: string } | undefined;
+  const prompt = payload?.prompt ?? '';
+
+  if (!prompt.trim()) {
+    reply.code(400);
+    return { ok: false, message: 'Prompt is required.' };
+  }
+
+  return { ok: true, result: evaluateAiVisibility(prompt, { model: payload?.model ?? 'mock' }) };
 });
 
 app.get('/api/ai/track', async () => {

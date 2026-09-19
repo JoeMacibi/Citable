@@ -263,7 +263,20 @@ export default function Home() {
                 <button onClick={startAudit} className="rounded-full bg-cyan-500 px-5 py-3 text-sm font-medium text-slate-950 transition hover:bg-cyan-400">
                   Audit Your Site Free →
                 </button>
-                <button onClick={() => setSelectedFinding({ title: 'Live demo overview', fix: 'Schema, crawl, and AI visibility checks are all surfaced in one real-time command center.' })} className="rounded-full border border-slate-700 bg-white/5 px-5 py-3 text-sm font-medium text-white transition hover:border-slate-500 hover:bg-white/10">
+                <button
+                  onClick={() =>
+                    setSelectedFinding({
+                      id: 'demo-overview',
+                      title: 'Live demo overview',
+                      severity: 'Low',
+                      impact: 18,
+                      effort: 'Low',
+                      recommendation: 'Schema, crawl, and AI visibility checks are all surfaced in one real-time command center.',
+                      fix: 'Schema, crawl, and AI visibility checks are all surfaced in one real-time command center.',
+                    })
+                  }
+                  className="rounded-full border border-slate-700 bg-white/5 px-5 py-3 text-sm font-medium text-white transition hover:border-slate-500 hover:bg-white/10"
+                >
                   View Live Demo
                 </button>
               </div>
