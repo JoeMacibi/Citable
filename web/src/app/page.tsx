@@ -3,6 +3,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { telemetry } from '@/lib/telemetry';
 
+type AuditFinding = {
+  id: string;
+  title: string;
+  severity: string;
+  impact: number;
+  effort: string;
+  recommendation: string;
+};
+
 type AuditStatus = {
   id: string;
   status: 'QUEUED' | 'CRAWLING' | 'ANALYZING' | 'COMPLETED' | 'FAILED';
@@ -10,7 +19,18 @@ type AuditStatus = {
   intent: 'website' | 'product' | 'ai';
   visibilityScore: number;
   technicalScore: number;
-  findings: Array<{ id: string; title: string; severity: string; impact: number; effort: string; recommendation: string }>;
+  findings: AuditFinding[];
+};
+
+type SelectedFinding = AuditFinding & {
+  fix?: string;
+};
+
+type AiResponse = {
+  mentions: number;
+  citations: number;
+  summary: string;
+  flow?: string[];
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
@@ -28,14 +48,14 @@ export default function Home() {
   const [domain, setDomain] = useState('https://example.com');
   const [loading, setLoading] = useState(false);
   const [audit, setAudit] = useState<AuditStatus | null>(null);
-  const [selectedFinding, setSelectedFinding] = useState<any | null>(null);
+  const [selectedFinding, setSelectedFinding] = useState<SelectedFinding | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [productName, setProductName] = useState('Acme Growth Suite');
   const [productPrice, setProductPrice] = useState('49');
   const [productDescription, setProductDescription] = useState('AI visibility and workflow automation platform');
   const [productSku, setProductSku] = useState('ACME-GROWTH-001');
   const [prompt, setPrompt] = useState('What is the best HR software for remote teams?');
-  const [aiResponse, setAiResponse] = useState<any>(null);
+  const [aiResponse, setAiResponse] = useState<AiResponse | null>(null);
 
   const currentStatusText = useMemo(() => {
     if (!audit) return 'No audit started';
@@ -164,7 +184,7 @@ export default function Home() {
 
   const visibleFindings = audit?.findings?.length ? audit.findings : [defaultFinding];
 
-  const handlePreview = (finding: any) => {
+  const handlePreview = (finding: AuditFinding) => {
     const issue = finding.title ?? 'Missing product schema';
     const fix = issue.includes('JSON')
       ? '{\n  "@context": "https://schema.org",\n  "@type": "Product",\n  "name": "Acme Growth Suite",\n  "offers": {"@type": "Offer", "price": "49", "priceCurrency": "USD"}\n}'
@@ -227,7 +247,7 @@ export default function Home() {
           </div>
         ) : null}
 
-        <section className="mb-8 rounded-3xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/10 via-slate-900 to-violet-500/10 p-8">
+        <section className="mb-8 rounded-3xl border border-cyan-500/20 bg-linear-to-br from-cyan-500/10 via-slate-900 to-violet-500/10 p-8">
           <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
             <div>
               <span className="inline-flex rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 text-[10px] font-medium uppercase tracking-[0.28em] text-cyan-300">
