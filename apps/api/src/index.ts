@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { db, ensureDatabase } from './db.js';
 import { crawlerWorker } from './crawlerWorker.js';
 import { aiPrompts, organizations, products } from './schema.js';
-import { jobStatusStore, startAuditJob } from './service.js';
+import { approveAuditFinding, getAuditStatus, jobStatusStore, startAuditJob } from './service.js';
 import { eq } from 'drizzle-orm';
 
 config();
@@ -79,7 +79,7 @@ app.post('/api/audits/run', async (request, reply) => {
 
 app.get('/api/audits/:id/status', async (request, reply) => {
   const { id } = request.params as { id: string };
-  const status = await jobStatusStore.get(id);
+  const status = await getAuditStatus(id);
 
   if (!status) {
     reply.code(404);
@@ -87,6 +87,19 @@ app.get('/api/audits/:id/status', async (request, reply) => {
   }
 
   return { ok: true, audit: status };
+});
+
+app.post('/api/audits/:id/findings/:findingId/approve', async (request, reply) => {
+  const { id, findingId } = request.params as { id: string; findingId: string };
+  const status = await getAuditStatus(id);
+
+  if (!status) {
+    reply.code(404);
+    return { ok: false, message: 'Audit not found' };
+  }
+
+  const updated = await approveAuditFinding(id, findingId);
+  return { ok: true, audit: updated, findingId };
 });
 
 app.post('/api/products', async (request, reply) => {

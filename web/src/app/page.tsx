@@ -5,7 +5,7 @@ import { telemetry } from '@/lib/telemetry';
 
 type AuditStatus = {
   id: string;
-  status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  status: 'QUEUED' | 'CRAWLING' | 'ANALYZING' | 'COMPLETED' | 'FAILED';
   domain: string;
   intent: 'website' | 'product' | 'ai';
   visibilityScore: number;
@@ -50,8 +50,8 @@ export default function Home() {
 
   const statusTimeline = [
     { label: 'Queued', detail: 'Job enqueued, starting crawler…', active: !audit || audit.status === 'QUEUED' },
-    { label: 'Crawling', detail: 'Discovering pages and checking robots.txt / sitemap.xml…', active: audit?.status === 'RUNNING' },
-    { label: 'Analyzing', detail: 'Auditing metadata, structured JSON-LD, and technical SEO…', active: audit?.status === 'RUNNING' },
+    { label: 'Crawling', detail: 'Discovering pages and checking robots.txt / sitemap.xml…', active: audit?.status === 'CRAWLING' },
+    { label: 'Analyzing', detail: 'Auditing metadata, structured JSON-LD, and technical SEO…', active: audit?.status === 'ANALYZING' },
     { label: 'Completed', detail: 'Generating Citable visibility score and prioritized fixes…', active: audit?.status === 'COMPLETED' },
   ];
 
