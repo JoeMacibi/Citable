@@ -3,9 +3,12 @@ import cors from '@fastify/cors';
 import { config } from 'dotenv';
 import { z } from 'zod';
 import { db, ensureDatabase } from './db.js';
-import { aiPrompts, organizations, products } from './schema.js';
-import { jobStatusStore, startAuditJob } from './service.js';
+import { aiPrompts, organizations, products, users } from './schema.js';
+import { approveAuditFinding, getAuditStatus, jobStatusStore, startAuditJob } from './service.js';
 import { eq } from 'drizzle-orm';
+import { analyzeProductSchema, buildProductSchemaSnippet } from './productSchema.js';
+import { evaluateAiVisibility } from './aiVisibility.js';
+import { createSessionToken, getSessionCookie, hashPassword, normalizeEmail, verifyPassword } from './auth.js';
 config();
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
@@ -25,6 +28,10 @@ const createAiTrackSchema = z.object({
     model: z.string().default('mock'),
     organizationId: z.number().optional(),
 });
+const authSchema = z.object({
+    email: z.string().trim().email().max(255),
+    password: z.string().min(8).max(128),
+});
 async function getOrCreateOrganization(organizationId) {
     if (organizationId) {
         const rows = await db.select().from(organizations).where(eq(organizations.id, organizationId)).limit(1);
@@ -43,6 +50,53 @@ app.get('/api/health', async () => ({
     message: 'Citable API is running',
     timestamp: new Date().toISOString(),
 }));
+app.post('/api/auth/register', async (request, reply) => {
+    const parsed = authSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+        reply.code(400);
+        return { ok: false, message: 'Enter a valid email and a password of at least 8 characters.' };
+    }
+    const email = normalizeEmail(parsed.data.email);
+    const existingUser = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+    if (existingUser[0]) {
+        reply.code(409);
+        return { ok: false, message: 'An account with this email already exists.' };
+    }
+    const organization = await db.insert(organizations).values({ name: `${email.split('@')[0]}'s workspace` }).returning();
+    const organizationId = organization[0]?.id;
+    if (!organizationId) {
+        reply.code(500);
+        return { ok: false, message: 'We could not create your workspace.' };
+    }
+    const [user] = await db.insert(users).values({
+        email,
+        passwordHash: await hashPassword(parsed.data.password),
+        organizationId,
+    }).returning({ id: users.id, email: users.email, organizationId: users.organizationId });
+    if (!user) {
+        reply.code(500);
+        return { ok: false, message: 'We could not create your account.' };
+    }
+    const token = createSessionToken({ userId: user.id, organizationId: user.organizationId, email: user.email });
+    reply.header('Set-Cookie', getSessionCookie(token));
+    return { ok: true, user };
+});
+app.post('/api/auth/login', async (request, reply) => {
+    const parsed = authSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+        reply.code(400);
+        return { ok: false, message: 'Enter your email and password.' };
+    }
+    const email = normalizeEmail(parsed.data.email);
+    const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    if (!user || !(await verifyPassword(parsed.data.password, user.passwordHash))) {
+        reply.code(401);
+        return { ok: false, message: 'Invalid email or password.' };
+    }
+    const token = createSessionToken({ userId: user.id, organizationId: user.organizationId, email: user.email });
+    reply.header('Set-Cookie', getSessionCookie(token));
+    return { ok: true, user: { id: user.id, email: user.email, organizationId: user.organizationId } };
+});
 app.post('/api/audits/run', async (request, reply) => {
     const parsed = createAuditSchema.safeParse(request.body ?? {});
     if (!parsed.success) {
@@ -66,12 +120,22 @@ app.post('/api/audits/run', async (request, reply) => {
 });
 app.get('/api/audits/:id/status', async (request, reply) => {
     const { id } = request.params;
-    const status = await jobStatusStore.get(id);
+    const status = await getAuditStatus(id);
     if (!status) {
         reply.code(404);
         return { ok: false, message: 'Audit not found' };
     }
     return { ok: true, audit: status };
+});
+app.post('/api/audits/:id/findings/:findingId/approve', async (request, reply) => {
+    const { id, findingId } = request.params;
+    const status = await getAuditStatus(id);
+    if (!status) {
+        reply.code(404);
+        return { ok: false, message: 'Audit not found' };
+    }
+    const updated = await approveAuditFinding(id, findingId);
+    return { ok: true, audit: updated, findingId };
 });
 app.post('/api/products', async (request, reply) => {
     const parsed = createProductSchema.safeParse(request.body ?? {});
@@ -80,6 +144,13 @@ app.post('/api/products', async (request, reply) => {
         return { ok: false, errors: parsed.error.flatten() };
     }
     const organization = await getOrCreateOrganization(parsed.data.organizationId);
+    const schemaAnalysis = analyzeProductSchema({
+        name: parsed.data.name,
+        description: parsed.data.description ?? '',
+        price: parsed.data.price,
+        currency: parsed.data.currency,
+        sku: `prod-${Date.now()}`,
+    });
     const [product] = await db.insert(products).values({
         organizationId: organization.id,
         name: parsed.data.name,
@@ -87,9 +158,25 @@ app.post('/api/products', async (request, reply) => {
         price: Math.round(parsed.data.price * 100),
         currency: parsed.data.currency,
         sku: `prod-${Date.now()}`,
-        schemaValid: 1,
+        schemaValid: schemaAnalysis.score >= 75 ? 1 : 0,
     }).returning();
-    return { ok: true, product };
+    return { ok: true, product, schema: schemaAnalysis, snippet: buildProductSchemaSnippet({
+            name: parsed.data.name,
+            description: parsed.data.description ?? '',
+            price: parsed.data.price,
+            currency: parsed.data.currency,
+            sku: `prod-${Date.now()}`,
+            url: 'https://example.com/product',
+        }) };
+});
+app.post('/api/products/schema/analyze', async (request, reply) => {
+    const payload = request.body;
+    if (!payload || typeof payload !== 'object') {
+        reply.code(400);
+        return { ok: false, message: 'A product payload is required.' };
+    }
+    const analysis = analyzeProductSchema(payload);
+    return { ok: true, analysis, snippet: buildProductSchemaSnippet(payload) };
 });
 app.get('/api/products', async () => {
     const rows = await db.select().from(products).limit(50);
@@ -113,12 +200,7 @@ app.post('/api/ai/track', async (request, reply) => {
     }
     const { prompt, model, organizationId } = parsed.data;
     const organization = await getOrCreateOrganization(organizationId);
-    const result = {
-        mentions: 12,
-        citations: 4,
-        summary: `The best-fitting response for “${prompt}” is based on product and SEO visibility signals.`,
-        flow: ['Brand', 'AI Response', 'Cited Source Domain'],
-    };
+    const result = evaluateAiVisibility(prompt, { model, organizationId: organization.id });
     const [record] = await db.insert(aiPrompts).values({
         organizationId: organization.id,
         prompt,
@@ -127,6 +209,15 @@ app.post('/api/ai/track', async (request, reply) => {
         citations: result.citations,
     }).returning();
     return { ok: true, result: { ...result, id: record?.id ?? Date.now() } };
+});
+app.post('/api/ai/visibility/evaluate', async (request, reply) => {
+    const payload = request.body;
+    const prompt = payload?.prompt ?? '';
+    if (!prompt.trim()) {
+        reply.code(400);
+        return { ok: false, message: 'Prompt is required.' };
+    }
+    return { ok: true, result: evaluateAiVisibility(prompt, { model: payload?.model ?? 'mock' }) };
 });
 app.get('/api/ai/track', async () => {
     const rows = await db.select().from(aiPrompts).limit(25);

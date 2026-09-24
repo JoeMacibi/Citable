@@ -4,11 +4,12 @@ import { config } from 'dotenv';
 import { z } from 'zod';
 import { db, ensureDatabase } from './db.js';
 import { crawlerWorker } from './crawlerWorker.js';
-import { aiPrompts, organizations, products } from './schema.js';
+import { aiPrompts, organizations, products, users } from './schema.js';
 import { approveAuditFinding, getAuditStatus, jobStatusStore, startAuditJob } from './service.js';
 import { eq } from 'drizzle-orm';
 import { analyzeProductSchema, buildProductSchemaSnippet } from './productSchema.js';
 import { evaluateAiVisibility } from './aiVisibility.js';
+import { createSessionToken, getSessionCookie, hashPassword, normalizeEmail, verifyPassword } from './auth.js';
 
 config();
 
@@ -35,6 +36,11 @@ const createAiTrackSchema = z.object({
   organizationId: z.number().optional(),
 });
 
+const authSchema = z.object({
+  email: z.string().trim().email().max(255),
+  password: z.string().min(8).max(128),
+});
+
 async function getOrCreateOrganization(organizationId?: number) {
   if (organizationId) {
     const rows = await db.select().from(organizations).where(eq(organizations.id, organizationId)).limit(1);
@@ -54,6 +60,62 @@ app.get('/api/health', async () => ({
   message: 'Citable API is running',
   timestamp: new Date().toISOString(),
 }));
+
+app.post('/api/auth/register', async (request, reply) => {
+  const parsed = authSchema.safeParse(request.body ?? {});
+  if (!parsed.success) {
+    reply.code(400);
+    return { ok: false, message: 'Enter a valid email and a password of at least 8 characters.' };
+  }
+
+  const email = normalizeEmail(parsed.data.email);
+  const existingUser = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+  if (existingUser[0]) {
+    reply.code(409);
+    return { ok: false, message: 'An account with this email already exists.' };
+  }
+
+  const organization = await db.insert(organizations).values({ name: `${email.split('@')[0]}'s workspace` }).returning();
+  const organizationId = organization[0]?.id;
+  if (!organizationId) {
+    reply.code(500);
+    return { ok: false, message: 'We could not create your workspace.' };
+  }
+
+  const [user] = await db.insert(users).values({
+    email,
+    passwordHash: await hashPassword(parsed.data.password),
+    organizationId,
+  }).returning({ id: users.id, email: users.email, organizationId: users.organizationId });
+
+  if (!user) {
+    reply.code(500);
+    return { ok: false, message: 'We could not create your account.' };
+  }
+
+  const token = createSessionToken({ userId: user.id, organizationId: user.organizationId, email: user.email });
+  reply.header('Set-Cookie', getSessionCookie(token));
+  return { ok: true, user };
+});
+
+app.post('/api/auth/login', async (request, reply) => {
+  const parsed = authSchema.safeParse(request.body ?? {});
+  if (!parsed.success) {
+    reply.code(400);
+    return { ok: false, message: 'Enter your email and password.' };
+  }
+
+  const email = normalizeEmail(parsed.data.email);
+  const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  if (!user || !(await verifyPassword(parsed.data.password, user.passwordHash))) {
+    reply.code(401);
+    return { ok: false, message: 'Invalid email or password.' };
+  }
+
+  const token = createSessionToken({ userId: user.id, organizationId: user.organizationId, email: user.email });
+  reply.header('Set-Cookie', getSessionCookie(token));
+  return { ok: true, user: { id: user.id, email: user.email, organizationId: user.organizationId } };
+});
 
 app.post('/api/audits/run', async (request, reply) => {
   const parsed = createAuditSchema.safeParse(request.body ?? {});

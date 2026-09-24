@@ -19,24 +19,29 @@ export const websites = pgTable('websites', {
     createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 export const audits = pgTable('audits', {
-    id: serial('id').primaryKey(),
-    websiteId: integer('website_id').references(() => websites.id).notNull(),
-    status: text('status').notNull().default('QUEUED'),
+    id: varchar('id', { length: 36 }).primaryKey(),
+    websiteId: integer('website_id').references(() => websites.id),
+    domain: text('domain').notNull(),
+    intent: text('intent').default('website').notNull(),
+    status: text('status').notNull().default('QUEUED'), // 'QUEUED' | 'CRAWLING' | 'ANALYZING' | 'COMPLETED' | 'FAILED'
     visibilityScore: integer('visibility_score').default(0),
     technicalScore: integer('technical_score').default(0),
     productScore: integer('product_score').default(0),
     aiScore: integer('ai_score').default(0),
     createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 export const auditFindings = pgTable('audit_findings', {
-    id: serial('id').primaryKey(),
-    auditId: integer('audit_id').references(() => audits.id).notNull(),
+    id: varchar('id', { length: 64 }).primaryKey(),
+    auditId: varchar('audit_id', { length: 36 }).references(() => audits.id).notNull(),
     issue: text('issue').notNull(),
     category: text('category').notNull(),
     severity: text('severity').notNull(),
     impact: integer('impact').default(0),
     effort: text('effort').notNull(),
     recommendedFix: text('recommended_fix').notNull(),
+    codeSnippet: text('code_snippet'),
+    resolved: integer('resolved').default(0),
     createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 export const products = pgTable('products', {

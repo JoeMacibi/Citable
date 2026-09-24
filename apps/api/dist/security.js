@@ -20,7 +20,7 @@ export function isPrivateOrBlockedIp(ip) {
     const ipType = isIP(cleanIp);
     if (ipType === 4) {
         const parts = cleanIp.split('.').map(Number);
-        const [b0, b1] = parts;
+        const [b0, b1, b2, b3] = parts;
         // 0.0.0.0/8 (Current network)
         if (b0 === 0)
             return true;
@@ -45,6 +45,22 @@ export function isPrivateOrBlockedIp(ip) {
         // 198.18.0.0/15 (Network benchmark testing)
         if (b0 === 198 && (b1 === 18 || b1 === 19))
             return true;
+        // 198.51.100.0/24 / 203.0.113.0/24 / 192.0.2.0/24 (documentation ranges)
+        if (b0 === 198 && b1 === 51 && b2 === 100)
+            return true;
+        if (b0 === 203 && b1 === 0 && b2 === 113)
+            return true;
+        if (b0 === 192 && b1 === 0 && b2 === 2)
+            return true;
+        // 224.0.0.0/4 multicast, 255.255.255.255/32 broadcast
+        if (b0 >= 224 || b0 === 255)
+            return true;
+        // 192.0.0.0/24 is reserved for IETF protocol assignments.
+        if (b0 === 192 && b1 === 0 && b2 === 0)
+            return true;
+        // 192.88.99.0/24 is 6to4 relay anycast; treat as blocked.
+        if (b0 === 192 && b1 === 88 && b2 === 99)
+            return true;
         return false;
     }
     // Check IPv6
@@ -59,6 +75,10 @@ export function isPrivateOrBlockedIp(ip) {
         }
         // Link-local unicast (fe80::/10)
         if (/^fe[89ab][0-9a-f]:/i.test(cleanIp)) {
+            return true;
+        }
+        // Multicast (ff00::/8) and reserved IPv6 ranges are blocked too.
+        if (/^ff[0-9a-f]{2}:/i.test(cleanIp)) {
             return true;
         }
         return false;

@@ -14,6 +14,7 @@ test('isPrivateOrBlockedIp detects private, loopback, and metadata ranges', () =
     assert.equal(isPrivateOrBlockedIp('172.20.0.1'), true);
     assert.equal(isPrivateOrBlockedIp('192.168.1.1'), true);
     assert.equal(isPrivateOrBlockedIp('169.254.169.254'), true);
+    assert.equal(isPrivateOrBlockedIp('198.51.100.10'), true);
     assert.equal(isPrivateOrBlockedIp('0.0.0.0'), true);
     assert.equal(isPrivateOrBlockedIp('::1'), true);
     assert.equal(isPrivateOrBlockedIp('::ffff:127.0.0.1'), true);

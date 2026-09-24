@@ -15,6 +15,8 @@ const initialSteps: AuditStep[] = [
   { label: 'Calculating Citable Visibility Score', status: 'pending' },
 ];
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+
 function GoogleMark() {
   return <span aria-hidden="true" className="text-base font-semibold text-white">G</span>;
 }
@@ -29,6 +31,8 @@ export default function AuthPage() {
   const [domain, setDomain] = useState('your domain');
   const [submitted, setSubmitted] = useState(false);
   const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [steps, setSteps] = useState(initialSteps);
 
   useEffect(() => {
@@ -58,9 +62,34 @@ export default function AuthPage() {
     setNotice('Your report is ready to open.');
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    completeSignup('email');
+    setSubmitting(true);
+    setError('');
+    setNotice('');
+
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email, password }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.message ?? 'We could not create your account.');
+      }
+      completeSignup('email');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'We could not create your account.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function handleOAuthClick() {
+    setError('');
+    setNotice('Google and GitHub sign-in will be available once OAuth credentials are configured.');
   }
 
   return (
@@ -81,11 +110,11 @@ export default function AuthPage() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <button type="button" onClick={() => completeSignup('oauth')} className="flex h-12 items-center justify-center gap-3 border border-[#27292d] bg-[#101114] text-sm font-medium text-[#f4f4f5] transition hover:border-[#6ee7b7]/60 hover:bg-[#15181a]">
+              <button type="button" onClick={handleOAuthClick} className="flex h-12 items-center justify-center gap-3 border border-[#27292d] bg-[#101114] text-sm font-medium text-[#f4f4f5] transition hover:border-[#6ee7b7]/60 hover:bg-[#15181a]">
                 <GoogleMark />
                 Continue with Google
               </button>
-              <button type="button" onClick={() => completeSignup('oauth')} className="flex h-12 items-center justify-center gap-3 border border-[#27292d] bg-[#101114] text-sm font-medium text-[#f4f4f5] transition hover:border-[#6ee7b7]/60 hover:bg-[#15181a]">
+              <button type="button" onClick={handleOAuthClick} className="flex h-12 items-center justify-center gap-3 border border-[#27292d] bg-[#101114] text-sm font-medium text-[#f4f4f5] transition hover:border-[#6ee7b7]/60 hover:bg-[#15181a]">
                 <GithubMark />
                 Continue with GitHub
               </button>
@@ -106,13 +135,14 @@ export default function AuthPage() {
                 <span className="mb-2 block text-xs font-medium text-[#c8c9cd]">Password</span>
                 <input required minLength={8} type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8+ characters" className="h-12 w-full border border-[#27292d] bg-[#101114] px-4 text-sm text-white outline-none transition placeholder:text-[#62656d] focus:border-[#6ee7b7] focus:ring-1 focus:ring-[#6ee7b7]/30" />
               </label>
-              <button type="submit" disabled={submitted} className="flex h-12 w-full items-center justify-center gap-2 bg-[#6ee7b7] text-sm font-semibold text-[#090a0c] transition hover:bg-[#a7f3d0] disabled:cursor-default disabled:opacity-80">
-                {submitted ? 'Report unlocked' : 'View Visibility Report'}
+              <button type="submit" disabled={submitted || submitting} className="flex h-12 w-full items-center justify-center gap-2 bg-[#6ee7b7] text-sm font-semibold text-[#090a0c] transition hover:bg-[#a7f3d0] disabled:cursor-default disabled:opacity-80">
+                {submitted ? 'Report unlocked' : submitting ? 'Creating account...' : 'View Visibility Report'}
                 <span aria-hidden="true">-&gt;</span>
               </button>
             </form>
 
             <p className="mt-5 text-center text-xs leading-5 text-[#62656d]">By continuing, you agree to Citable&apos;s Terms and Privacy Policy.</p>
+            {error ? <p role="alert" className="mt-4 text-center text-sm text-red-300">{error}</p> : null}
             {notice ? <p role="status" className="mt-4 text-center text-sm text-[#6ee7b7]">{notice}</p> : null}
           </div>
         </section>
