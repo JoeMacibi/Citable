@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { telemetry } from '@/lib/telemetry';
 
 type AuditFinding = {
@@ -45,6 +46,7 @@ const defaultFinding = {
 };
 
 export default function Home() {
+  const router = useRouter();
   const [domain, setDomain] = useState('https://example.com');
   const [loading, setLoading] = useState(false);
   const [audit, setAudit] = useState<AuditStatus | null>(null);
@@ -131,6 +133,7 @@ export default function Home() {
         properties: { auditId: payload.audit.id, domain: normalized },
       });
       setAudit(payload.audit);
+      router.push(`/auth?domain=${encodeURIComponent(normalized)}&auditId=${encodeURIComponent(payload.audit.id)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'We could not reach this URL. Please check the domain and try again.');
     } finally {

@@ -16,7 +16,7 @@ export type CrawlPayload = {
   intent: 'website' | 'product' | 'ai';
 };
 
-export type FindingItem = {
+export type FindingItem = 
   id: string;
   auditId: string;
   issue: string;
